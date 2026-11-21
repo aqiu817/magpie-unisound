@@ -1,4 +1,5 @@
 .ledger-test/
 .research-*.json
+.registry-*.json
 *.log
 node_modules/
