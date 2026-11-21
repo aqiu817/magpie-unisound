@@ -3,6 +3,8 @@
 OpenCode provider plugin that brings **Unisound Token Hub** ([maas.unisound.com](https://maas.unisound.com)) **U Plan** models into [magpie](https://usemagpie.ai). Built for U Plan (Token Plan) users: point-based costs, dual-pool quota windows, and gift-quota vision.
 
 > 中文说明：[README.md](./README.md)
+>
+> **Design scope**: this plugin is currently built for **U Plan Free-tier** users — quota windows show Free-tier totals (5h burst 500 / weekly 2500), while points spent are computed from the official coefficients and verified against the server. Standard / Plus tier support will be considered only when there is real demand (issues welcome, with your tier and usage pattern).
 
 ## Features
 
@@ -41,7 +43,7 @@ Models appear as `unisound/u2-flash`, `unisound/u2-med`, `unisound/u2-radimed`.
 ## Known limits
 
 - **Point balances are local estimates**: counted since plugin installation, rolling windows approximate the official reset rules and err conservative. Verified against the console: the local ledger matches the server-side `points used` exactly. Authoritative balances live in the [console](https://maas.unisound.com/admin/subscription) (the server quota endpoint only accepts browser sessions, not API keys).
-- **Windows show Free-tier sizes** (Standard / Plus users still get correct ratios).
+- **Free-tier by design**: window totals are Free-tier constants; Standard / Plus users see exact spent points but wrong progress ratios — tier configuration is deferred until a real need shows up.
 - **No point cost for `u2-radimed`**: its gift-pool coefficients are unpublished, so magpie shows zero cost (token stats are unaffected).
 
 ## Privacy

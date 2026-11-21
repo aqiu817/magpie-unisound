@@ -1,7 +1,7 @@
 {
   "name": "magpie-unisound",
   "version": "0.1.0",
-  "description": "OpenCode provider plugin: Unisound Token Hub U Plan (u2-flash / u2-med / u2-radimed) for magpie, point-based costs and rolling quota windows",
+  "description": "OpenCode provider plugin: Unisound Token Hub U Plan Free tier (u2-flash / u2-med / u2-radimed) for magpie — point-based costs and dual-pool quota windows",
   "type": "module",
   "main": "./index.mjs",
   "files": [
@@ -39,8 +39,11 @@
     },
     "maxConcurrency": 8,
     "summary": {
-      "en": "Use Unisound Token Hub U Plan models (u2-flash / u2-med / u2-radimed) with an API key: point-based costs, rolling quota windows, gift-quota vision.",
-      "zh": "用 API Key 接入云知声 Token Hub U Plan（u2-flash / u2-med / u2-radimed）：积分口径计费、双池额度窗口、赠送池视觉模型。"
+      "en": "Use Unisound Token Hub U Plan Free-tier models (u2-flash / u2-med / u2-radimed) with an API key: point-based costs, dual-pool quota windows, gift-quota vision.",
+      "zh": "用 API Key 接入云知声 Token Hub U Plan Free 档（u2-flash / u2-med / u2-radimed）：积分口径计费、双池额度窗口、赠送池视觉模型。"
     }
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
   }
 }
