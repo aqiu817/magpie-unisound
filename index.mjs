@@ -15,6 +15,8 @@
 //   - cost 字段用积分口径（每百万 token 的积分数，由官方系数表换算），
 //     magpie 用量统计里的 cost 就是 U Plan 积分消耗。
 //   - u2-radimed 走独立赠送池（不消耗积分），视觉请求路由到它是免费额度套利。
+//   - 可选登录网页 Session Cookie（auth prompts → metadata.cookie）：usage 显示
+//     服务端实时用量（周池/5h 池真值、赠送池、planCode 档位自适应）；不填回落本地账本。
 
 import { CHAT_BASE, USER_AGENT, fetchJSON } from "./lib/platform.mjs"
 import { UPLAN_CHAT_MODELS, PAYG_CHAT_MODELS } from "./lib/models.mjs"
@@ -27,6 +29,7 @@ import {
   usageOfResponse,
   usageOfChatStreamText,
 } from "./lib/points.mjs"
+import { parseCookieLine, fetchServerQuota, quotaToWindows, quotaNote } from "./lib/server-quota.mjs"
 
 // 平台未公布限流参数，先沿用 amd-cloud 的保守口径，真机校正后调整。
 const MAX_CONCURRENCY = 8
@@ -134,7 +137,23 @@ function makePlugin() {
     auth: {
       provider: "unisound",
       maxConcurrency: MAX_CONCURRENCY,
-      methods: [{ type: "api", label: "Unisound U Plan API Key", placeholder: "sk-…" }],
+      methods: [
+        {
+          type: "api",
+          label: "Unisound U Plan API Key",
+          placeholder: "tp-…",
+          // 可选第二凭据：网页端 Session Cookie。粘贴后 usage 显示服务端实时用量
+          //（周池/5h 池真值 + 赠送池 + planCode 档位自适应）；不填则显示本地估算。
+          // 回答由 magpie 宿主自动存进 auth.metadata.cookie（官方 prompts 机制）。
+          prompts: [
+            {
+              type: "password",
+              key: "cookie",
+              label: "网页端 Session Cookie（可选，用于实时用量；留空则显示本地估算）",
+            },
+          ],
+        },
+      ],
       // key 原样保存（不做 authorize）：无效 key 由首个请求的 401 触发 magpie 的账号标记。
       // 鉴权头由 magpie 按 API key 登录自动补上；我们改写 UA 并做积分记账。
       async loader(getAuth) {
@@ -142,16 +161,26 @@ function makePlugin() {
         if (auth?.type !== "api") return {}
         return { baseURL: CHAT_BASE, fetch: makeFetch(auth.key ?? auth.accountId) }
       },
-      // 本地积分双池窗口（5h 突发池 / 周池，滚动近似）。服务端真值 M3 接入。
+      // 双数据源：metadata.cookie 在 → 控制台端点服务端真值（周池/5h 池+赠送池+档位）；
+      // 无 cookie 或查询失败 → 本地账本滚动估算。真值查询失败不影响请求链路。
       async usage(getAuth) {
         const auth = await getAuth()
         if (auth?.type !== "api") {
           return { plan: "Unisound U Plan", error: "尚未登录 Unisound U Plan", windows: [] }
         }
+        const cookie = parseCookieLine(auth.metadata?.cookie)
+        if (cookie) {
+          const q = await fetchServerQuota(cookie)
+          if (q.ok) {
+            return { plan: "Unisound U Plan", note: quotaNote(q.data), windows: quotaToWindows(q.data) }
+          }
+        }
         const windows = windowsFor(auth.key ?? auth.accountId ?? "default")
         return {
           plan: "Unisound U Plan",
-          note: "本地积分估算：插件自响应 usage 按官方系数精算，自装插件起算；窗口为滚动近似，实际余量以控制台为准",
+          note: cookie
+            ? "服务端查询失败（Cookie 可能已过期，重新粘贴网页 Cookie 可恢复实时用量）；以下为本地积分估算（自装插件起算，滚动近似偏保守）"
+            : "本地积分估算：插件自响应 usage 按官方系数精算，自装插件起算；粘贴网页 Session Cookie 可切换为服务端实时用量（含赠送池与档位识别）",
           windows,
         }
       },

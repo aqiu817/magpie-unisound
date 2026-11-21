@@ -393,3 +393,175 @@ test("ensureIncludeUsage：流式补 include_usage（幂等），非流式与已
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// ---------- v0.2：服务端真值（lib/server-quota.mjs，Session Cookie） ----------
+
+import { parseCookieLine, fetchServerQuota, quotaToWindows, quotaNote, MANAGER_QUOTA_URL } from "../lib/server-quota.mjs"
+
+const QUOTA_RESULT = {
+  planName: "U Plan Free",
+  planCode: "U-FREE",
+  status: "ACTIVE",
+  weeklyPointsUsed: 12.3456,
+  weeklyPointsTotal: 2500,
+  weeklyPointsRemain: 2487.6544,
+  weeklyResetInDays: 4,
+  weeklyResetInHours: 7,
+  weeklyResetInLessThanOneHour: false,
+  window5hUsed: 40,
+  window5hLimit: 500,
+  window5hResetInMinutes: 92,
+  giftQuotas: [
+    { available: true, displayAmount: "7,375,000", displayUnit: "Token", modelId: "u2-ocr", remainAmount: 7375000, totalAmount: 7375000, unit: "TOKEN", usedAmount: 0 },
+    { available: true, displayAmount: "475,000", displayUnit: "Token", modelId: "u2-radimed", remainAmount: 474000, totalAmount: 475000, unit: "TOKEN", usedAmount: 1000 },
+    { available: true, displayAmount: "8", displayUnit: "小时", modelId: "u2-asr", remainAmount: 7.5, totalAmount: 8, unit: "HOUR", usedAmount: 0.5 },
+  ],
+}
+
+test("parseCookieLine：带前缀/裸格式/规范化，无效输入返 null", () => {
+  assert.equal(parseCookieLine("Cookie: JSESSIONID=abc; maasToken=xyz"), "JSESSIONID=abc; maasToken=xyz")
+  assert.equal(parseCookieLine("cookie:  JSESSIONID=abc "), "JSESSIONID=abc")
+  assert.equal(parseCookieLine("JSESSIONID=abc; maasToken=xyz"), "JSESSIONID=abc; maasToken=xyz")
+  assert.equal(parseCookieLine("  JSESSIONID=abc ; ; maasToken=xyz "), "JSESSIONID=abc; maasToken=xyz")
+  assert.equal(parseCookieLine(""), null)
+  assert.equal(parseCookieLine("   "), null)
+  assert.equal(parseCookieLine("garbage without equals"), null)
+  assert.equal(parseCookieLine("Cookie:"), null)
+  assert.equal(parseCookieLine(null), null)
+  assert.equal(parseCookieLine(undefined), null)
+  assert.equal(parseCookieLine(42), null)
+})
+
+test("fetchServerQuota：200+result 成功，错误壳/401/异常都 ok=false 不抛错", async () => {
+  // 成功
+  const okJson = JSON.stringify({ errorCode: 0, errorMsg: "", result: QUOTA_RESULT })
+  const ok = await fetchServerQuota("JSESSIONID=abc", async (url, init) => {
+    assert.equal(url, MANAGER_QUOTA_URL)
+    assert.equal(init.headers.cookie, "JSESSIONID=abc")
+    return new Response(okJson, { status: 200, headers: { "content-type": "application/json" } })
+  })
+  assert.equal(ok.ok, true)
+  assert.equal(ok.data.planCode, "U-FREE")
+  // 200 错误壳（会话失效形态）
+  const shell = await fetchServerQuota("JSESSIONID=dead", async () =>
+    new Response(JSON.stringify({ errorCode: 500, errorMsg: "用户未登录或session超时" }), { status: 200, headers: { "content-type": "application/json" } }))
+  assert.equal(shell.ok, false)
+  // 401
+  const unauthorized = await fetchServerQuota("JSESSIONID=old", async () => new Response("{}", { status: 401 }))
+  assert.equal(unauthorized.ok, false)
+  assert.equal(unauthorized.status, 401)
+  // 网络异常
+  const boom = await fetchServerQuota("JSESSIONID=abc", async () => { throw new Error("net down") })
+  assert.equal(boom.ok, false)
+  assert.equal(boom.status, 0)
+  // 非字符串 cookie
+  const badCookie = await fetchServerQuota(undefined, async () => new Response("{}", { status: 200 }))
+  assert.equal(badCookie.ok, false)
+  // 非 JSON body
+  const html = await fetchServerQuota("JSESSIONID=abc", async () => new Response("<html>login</html>", { status: 200 }))
+  assert.equal(html.ok, false)
+})
+
+test("quotaToWindows：周池+5h 池+三个赠送池全映射（真值字段）", () => {
+  const wins = quotaToWindows(QUOTA_RESULT)
+  assert.equal(wins.length, 5)
+  const week = wins.find((w) => w.name.includes("周积分"))
+  assert.equal(week.amount, 12.3456)
+  assert.equal(week.limit, 2500)
+  assert.ok(week.name.includes("U Plan Free"))
+  assert.ok(week.display.includes("4 天7 小时后重置"))
+  const w5h = wins.find((w) => w.name.includes("5h"))
+  assert.equal(w5h.amount, 40)
+  assert.equal(w5h.limit, 500)
+  assert.ok(w5h.display.includes("2 小时后重置"), "92 分钟取整为 2 小时")
+  const radimed = wins.find((w) => w.name.includes("u2-radimed"))
+  assert.equal(radimed.amount, 1000)
+  assert.equal(radimed.limit, 475000)
+  assert.ok(radimed.display.includes("剩余 474000 / 475000 Token"))
+  const asr = wins.find((w) => w.name.includes("u2-asr"))
+  assert.ok(asr.display.includes("小时"))
+  assert.equal(asr.unit, "小时")
+  const ocr = wins.find((w) => w.name.includes("u2-ocr"))
+  assert.equal(ocr.used, 0)
+})
+
+test("quotaToWindows：字段缺席/畸形容忍（5h 缺、gift 非 object、无 planName）", () => {
+  const partial = quotaToWindows({
+    weeklyPointsUsed: 1,
+    weeklyPointsTotal: 100,
+    planCode: "U-PLUS",
+    giftQuotas: [null, "junk", { modelId: "u2-ocr-med", totalAmount: 7375000, remainAmount: 7375000 }],
+  })
+  assert.equal(partial.length, 2)
+  assert.ok(partial[0].name.includes("周积分"))
+  assert.ok(!partial[0].name.includes("（"), "planName 缺席时不带括号名")
+  assert.equal(partial[1].name.includes("u2-ocr-med"), true)
+  assert.equal(quotaToWindows(null).length, 0)
+  assert.equal(quotaToWindows(undefined).length, 0)
+  assert.equal(quotaToWindows("junk").length, 0)
+  // 全空 result
+  assert.equal(quotaToWindows({}).length, 0)
+})
+
+test("quotaNote 带 planCode 档位标注", () => {
+  assert.ok(quotaNote(QUOTA_RESULT).includes("U-FREE"))
+  assert.ok(quotaNote({}).includes("服务端实时用量"))
+})
+
+test("usage 钩子分流：有 cookie → 服务端真值；失效 → 回落本地估算", async () => {
+  const plugin = await UnisoundPlugin()
+  const hooks = await plugin
+  const okJson = JSON.stringify({ errorCode: 0, errorMsg: "", result: QUOTA_RESULT })
+  const origFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), MANAGER_QUOTA_URL, "usage 分流应调控制台端点")
+    assert.equal(init.headers.cookie, "JSESSIONID=abc; maasToken=xyz")
+    return new Response(okJson, { status: 200, headers: { "content-type": "application/json" } })
+  }
+  try {
+    // 真值路径
+    const live = await hooks.auth.usage(async () => ({
+      type: "api",
+      key: "tp-live",
+      metadata: { cookie: "Cookie: JSESSIONID=abc; maasToken=xyz" },
+    }))
+    assert.equal(live.plan, "Unisound U Plan")
+    assert.ok(live.note.includes("服务端实时用量"))
+    assert.ok(live.note.includes("U-FREE"))
+    assert.equal(live.windows.length, 5)
+    assert.ok(live.windows.some((w) => w.name.includes("赠送池")))
+    // 失效路径：错误壳 → 回落本地账本 note
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ errorCode: 500, errorMsg: "用户未登录或session超时" }), { status: 200, headers: { "content-type": "application/json" } })
+    const dir = mkdtempSync(join(tmpdir(), "unisound-ledger-"))
+    setLedgerDir(dir)
+    try {
+      recordUsage("tp-fallback", "u2-flash", { prompt_tokens: 10000, completion_tokens: 5000, prompt_tokens_details: { cached_tokens: 0 } })
+      const stale = await hooks.auth.usage(async () => ({
+        type: "api",
+        key: "tp-fallback",
+        metadata: { cookie: "JSESSIONID=dead" },
+      }))
+      assert.ok(stale.note.includes("Cookie 可能已过期"))
+      assert.ok(stale.windows.length >= 1)
+      assert.ok(stale.windows[0].name.includes("Free 档") || stale.windows[0].name.includes("5h") || stale.windows[0].name.includes("周"), "回落窗口是本地口径")
+      // 无 cookie → 纯本地估算 note
+      const local = await hooks.auth.usage(async () => ({ type: "api", key: "tp-fallback" }))
+      assert.ok(local.note.includes("本地积分估算"))
+    } finally {
+      setLedgerDir(null)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+
+test("登录方式带可选 cookie prompts（password 类型）", async () => {
+  const hooks = await UnisoundPlugin()
+  const m = hooks.auth.methods[0]
+  assert.equal(m.type, "api")
+  assert.ok(Array.isArray(m.prompts) && m.prompts.length === 1)
+  assert.equal(m.prompts[0].type, "password")
+  assert.equal(m.prompts[0].key, "cookie")
+})
