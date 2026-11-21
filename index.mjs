@@ -19,6 +19,7 @@
 import { CHAT_BASE, USER_AGENT, fetchJSON } from "./lib/platform.mjs"
 import { UPLAN_CHAT_MODELS, PAYG_CHAT_MODELS } from "./lib/models.mjs"
 import { catalogToModels } from "./lib/catalog.mjs"
+import { COEFFS } from "./lib/points.mjs"
 import {
   setLedgerDir,
   recordUsage,
@@ -101,11 +102,12 @@ function makeFetch(key) {
   }
 }
 
-// exposePayg（PAYG 目录开关）按约定从插件参数 magpie.options 读。2026-11-21 沙箱
-// 实测当前宿主对 provider 插件尚未实装 options 传递（插件参数恒为 { magpie: {} }、
-// config 钩子也无第二参；中间件的 ctx.options 已实装）——开关保留为前向兼容层，
-// 宿主实装后即生效；服务端也按 key 类型隔离目录，此开关仅在按量 key 下有意义。
-export const UnisoundPlugin = async function plugin({ magpie, directory } = {}) {
+function makePlugin() {
+  // exposePayg（PAYG 目录开关）按约定从插件参数 magpie.options 读。2026-11-21 沙箱
+  // 实测当前宿主对 provider 插件尚未实装 options 传递（插件参数恒为 { magpie: {} }、
+  // config 钩子也无第二参；中间件的 ctx.options 已实装）——开关保留为前向兼容层，
+  // 宿主实装后即生效；服务端也按 key 类型隔离目录，此开关仅在按量 key 下有意义。
+  return async function plugin({ magpie, directory } = {}) {
   const exposePayg = magpie?.options?.exposePayg === true
   // 积分账本位置：宿主给的配置目录；拿不到时 points.mjs 有固定路径兜底
   if (directory) setLedgerDir(directory)
@@ -157,18 +159,29 @@ export const UnisoundPlugin = async function plugin({ magpie, directory } = {}) 
 
     // 每账号动态模型表：GET /v1/models（Token Plan key 的目录由服务端隔离成
     // U Plan 三模型），limit 以目录为准；拉不到兜底静态白名单。
+    // ⚠️ 不透传宿主参数：2026-11-21 沙箱实锤，部分宿主路径调 provider.models 时
+    // 传入的 providerModels 是 provider 配置对象本身（含 id/name/source/env/options/
+    // npm/api/decide/searches/models 等字段）——原样返回会把配置键全部变成"模型"。
+    // 一律显式构造返回，未登录也给静态白名单。
     provider: {
       id: "unisound",
-      async models(providerModels, { auth } = {}) {
-        if (auth?.type !== "api") return providerModels
+      async models(_providerModels, { auth } = {}) {
         try {
-          const res = await fetchJSON(`${CHAT_BASE}/models`, auth.key)
-          if (!res.ok) return providerModels
-          return catalogToModels(res.data, UPLAN_CHAT_MODELS)
+          if (auth?.type === "api") {
+            const res = await fetchJSON(`${CHAT_BASE}/models`, auth.key)
+            if (res.ok) return catalogToModels(res.data, UPLAN_CHAT_MODELS)
+          }
         } catch {
-          return providerModels
+          // 拉取失败走静态白名单
         }
+        return UPLAN_CHAT_MODELS
       },
     },
   }
 }
+}
+
+export const UnisoundPlugin = makePlugin()
+
+// 诊断辅助（非函数导出，宿主不会被当插件调用）：模型表与积分系数的可测试出口。
+export const _internal = { UPLAN_CHAT_MODELS, PAYG_CHAT_MODELS, COEFFS }
