@@ -470,19 +470,43 @@ test("quotaToWindows：周池+5h 池+三个赠送池全映射（真值字段）"
   assert.equal(week.limit, 2500)
   assert.ok(week.name.includes("U Plan Free"))
   assert.ok(week.display.includes("4 天7 小时后重置"))
+  // resetsAt：4 天 7 小时倒计时 → 毫秒时间戳
+  assert.equal(typeof week.resetsAt, "number")
+  assert.ok(Math.abs(week.resetsAt - (Date.now() + (4 * 24 + 7) * 3600 * 1000)) < 60000, "resetsAt ≈ now + 4d7h")
+  assert.equal(week.aside, undefined, "主积分池不是赠送池，不带 aside")
   const w5h = wins.find((w) => w.name.includes("5h"))
   assert.equal(w5h.amount, 40)
   assert.equal(w5h.limit, 500)
   assert.ok(w5h.display.includes("2 小时后重置"), "92 分钟取整为 2 小时")
+  assert.equal(typeof w5h.resetsAt, "number")
+  assert.ok(Math.abs(w5h.resetsAt - (Date.now() + 92 * 60 * 1000)) < 60000, "resetsAt ≈ now + 92min")
   const radimed = wins.find((w) => w.name.includes("u2-radimed"))
   assert.equal(radimed.amount, 1000)
   assert.equal(radimed.limit, 475000)
   assert.ok(radimed.display.includes("剩余 474000 / 475000 Token"))
+  assert.equal(radimed.aside, true, "赠送池标 aside（用完不影响账号）")
+  assert.equal(radimed.resetsAt, week.resetsAt, "赠送池重置时间沿用周池（同为周口径）")
   const asr = wins.find((w) => w.name.includes("u2-asr"))
   assert.ok(asr.display.includes("小时"))
   assert.equal(asr.unit, "小时")
+  assert.equal(asr.aside, true)
   const ocr = wins.find((w) => w.name.includes("u2-ocr"))
   assert.equal(ocr.used, 0)
+  assert.equal(ocr.resetsAt, week.resetsAt)
+})
+
+test("quotaToWindows：window5hExpiresAt 绝对时间优先于 ResetInMinutes", () => {
+  const iso = "2026-11-22T03:30:00+08:00"
+  const wins = quotaToWindows({
+    window5hUsed: 10,
+    window5hLimit: 500,
+    window5hResetInMinutes: 999,
+    window5hExpiresAt: iso,
+    weeklyPointsUsed: 0,
+    weeklyPointsTotal: 2500,
+  })
+  const w5h = wins.find((w) => w.name.includes("5h"))
+  assert.equal(w5h.resetsAt, Date.parse(iso), "有 ExpiresAt 时用它")
 })
 
 test("quotaToWindows：字段缺席/畸形容忍（5h 缺、gift 非 object、无 planName）", () => {
