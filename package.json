@@ -1,7 +1,7 @@
 {
   "name": "magpie-unisound",
   "version": "0.2.0",
-  "description": "OpenCode provider plugin: Unisound Token Hub U Plan (u2-flash / u2-med / u2-radimed) for magpie — point-based costs, live quota via web session cookie, gift-pool vision",
+  "description": "把云知声 Token Hub（maas.unisound.com）U Plan 接入 magpie 的 OpenCode 供应商插件：u2-flash / u2-med / u2-radimed，积分口径计费，可选网页 Session Cookie 查看服务端实时用量（赠送池 + 档位自适应），Unisound U Plan provider plugin for magpie",
   "type": "module",
   "main": "./index.mjs",
   "files": [
@@ -40,7 +40,7 @@
     "maxConcurrency": 8,
     "summary": {
       "en": "Use Unisound Token Hub U Plan models (u2-flash / u2-med / u2-radimed) with an API key: point-based costs, live quota windows via optional web session cookie (tier auto-detected), gift-pool vision.",
-      "zh": "用 API Key 接入云知声 Token Hub U Plan（u2-flash / u2-med / u2-radimed）：积分口径计费；可选粘贴网页 Cookie 查看服务端实时用量（自动识别档位）；赠送池视觉模型。"
+      "zh": "用 API Key 接入云知声 Token Hub U Plan（u2-flash / u2-med / u2-radimed）：积分口径计费；可选粘贴网页 Session Cookie 查看服务端实时用量（周池/5h 池、赠送池、档位自适应）。"
     }
   },
   "publishConfig": {
